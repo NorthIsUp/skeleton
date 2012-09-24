@@ -45,6 +45,7 @@ setup(
     license='BSD',
     packages=['skeleton', 'skeleton.tests', 'skeleton.examples'],
     test_suite='skeleton.tests',
+    setup_requires=['nose'],
     include_package_data=True,
     zip_safe=False,
     install_requires=[],

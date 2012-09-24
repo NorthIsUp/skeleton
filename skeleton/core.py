@@ -7,16 +7,16 @@ import datetime
 import functools
 import logging
 import optparse
-import os
 import shutil
 import sys
 import weakref
+from path import path
 
 from skeleton.utils import (
     get_loggger, get_file_mode, vars_to_optparser, prompt)
 
 
-_LOG = get_loggger(__name__)
+logger = get_loggger(__name__)
 
 
 class SkeletonError(Exception):
@@ -176,12 +176,12 @@ class Skeleton(collections.MutableMapping):
                 "The src attribute of the %s Skeleton is not set" %
                 self.__class__.__name__
                 )
-
+        self.src = path(self.src)
         mod = sys.modules[self.__class__.__module__]
-        mod_dir = os.path.dirname(mod.__file__)
-        skel_path = os.path.join(mod_dir, self.src)
+        mod_dir = path(mod.__file__).dirname()
+        skel_path = mod_dir / self.src
 
-        if not os.path.exists(skel_path):
+        if not skel_path.exists():
             raise AttributeError("No skeleton at %r" % skel_path)
         return skel_path
 
@@ -241,7 +241,7 @@ class Skeleton(collections.MutableMapping):
             if var.name not in self.set_variables:
                 self[var.name] = var.do_prompt()
             else:
-                _LOG.debug("Variable %r already set", var.name)
+                logger.debug("Variable %r already set", var.name)
 
     @run_requirements_first
     def write(self, dst_dir, run_dry=False):
@@ -265,43 +265,32 @@ class Skeleton(collections.MutableMapping):
         - IOError if it cannot read the skeleton files, or cannot create
           files and folder.
         """
+        dst_dir = path(dst_dir)
         self.run_dry = run_dry
 
-        _LOG.info(
+        logger.info(
             "Rendering %s skeleton at %r...",
             self.__class__.__name__,
             dst_dir)
 
         self.check_variables()
 
-        if not os.path.exists(dst_dir):
+        if not dst_dir.exists():
             self._mkdir(dst_dir)
 
         real_src = self.real_src
         real_src_len = len(real_src)
-        _LOG.debug("Getting skeleton from %r" % real_src)
+        logger.debug("Getting skeleton from %r" % real_src)
 
-        for dir_path, dir_names, file_names in os.walk(real_src):
-            rel_dir_path = dir_path[real_src_len:].lstrip(r'\/')
+        for src in real_src.walk():
+            rel_dir_path = src.dirname()[real_src_len:].lstrip(r'\/')
             rel_dir_path = self._format_file_name(rel_dir_path, real_src)
+            dst = dst_dir / rel_dir_path / self._format_file_name(src.basename(), '')
 
-            #copy files
-            for file_name in file_names:
-                src = os.path.join(dir_path, file_name)
-                dst = os.path.join(
-                    dst_dir,
-                    rel_dir_path,
-                    self._format_file_name(file_name, dir_path)
-                    )
+            if src.isfile():
                 self._copy_file(src, dst)
 
-            #copy directories
-            for dir_name in dir_names:
-                src = os.path.join(dir_path, dir_name)
-                dst = os.path.join(
-                    dst_dir,
-                    rel_dir_path,
-                    self._format_file_name(dir_name, dir_path))
+            elif src.isdir():
                 self._mkdir(dst, like=src)
 
     def run(self, dst_dir, run_dry=False):
@@ -365,24 +354,28 @@ class Skeleton(collections.MutableMapping):
         return template.format(**self)
 
     def _format_file_name(self, file_name, dir_path):
+        file_name = path(file_name)
+        dir_path = path(dir_path)
+
         try:
             return self.template_formatter(file_name)
         except (KeyError,), exc:
             raise FileNameKeyError(
                 exc.args[0],
-                os.path.join(dir_path, file_name)
+                dir_path / file_name
                 )
 
-    def _mkdir(self, path, like=None):
-        """Create a directory (using os.mkdir)
+    def _mkdir(self, dst_path, like=None):
+        """Create a directory (using path.makedirs_p)
 
         Only log the event if self.run_dry is True.
         """
-        _LOG.info("Create directory %r", path)
-        if not self.run_dry and not os.path.exists(path):
-            os.mkdir(path)
+        dst_path = path(dst_path)
+        logger.info("Create directory %r", dst_path)
+        if not self.run_dry and not dst_path.exists():
+            dst_path.makedirs_p()
         if like is not None:
-            self._set_mode(path, like)
+            self._set_mode(dst_path, like)
 
     def _copy_file(self, src, dst):
         """Copy src file to dst and format dst if src is a template.
@@ -402,7 +395,7 @@ class Skeleton(collections.MutableMapping):
 
         Only log the event if self.run_dry is True.
         """
-        _LOG.info("Copy %r to %r", src, dst)
+        logger.info("Copy %r to %r", src, dst)
         if not self.run_dry:
             shutil.copyfile(src, dst)
         self._set_mode(dst, like=src)
@@ -412,7 +405,7 @@ class Skeleton(collections.MutableMapping):
 
         Raises a KeyError if a variable is missing.
         """
-        _LOG.info("Creating %r from %r template...", dst, src)
+        logger.info("Creating %r from %r template...", dst, src)
         if not self.run_dry:
             fd_src = None
             fd_dst = None
@@ -427,13 +420,13 @@ class Skeleton(collections.MutableMapping):
                     fd_dst.close()
         self._set_mode(dst, like=src)
 
-    def _set_mode(self, path, like):
+    def _set_mode(self, dst_path, like):
         """
-        Set mode of `path` with the mode of `like`.
+        Set mode of `dst_path` with the mode of `like`.
         """
-        _LOG.info("Set mode of %r to '%o'", path, get_file_mode(like))
+        logger.info("Set mode of %r to '%o'", dst_path, get_file_mode(like))
         if not self.run_dry:
-            shutil.copymode(like, path)
+            shutil.copymode(like, dst_path)
 
 
 class Var(object):
@@ -487,7 +480,7 @@ class Var(object):
         """Prompt user for variable value and return the validated value
 
         It will keep prompting the user until it receive a valid value.
-        By default, a value is valid if it is not a empty string string or if 
+        By default, a value is valid if it is not a empty string string or if
         the variable has a default.
 
         If the user value is empty and the variable has a default, the default
@@ -503,7 +496,6 @@ class Var(object):
                 return self.validate(self._prompt(prompt_))
             except (ValidateError,), exc:
                 print str(exc)
-
 
     def validate(self, response):
         """Checks the user has given a non empty value or that the variable has
@@ -552,7 +544,7 @@ class Bool(Var):
         """Checks the response is either Y, YES, N or NO, or that the variable
         has a default value.
 
-        Raises a ValidateError exception if the response wasn't recognized or 
+        Raises a ValidateError exception if the response wasn't recognized or
         if no value was given and one is required.
 
         """

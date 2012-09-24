@@ -13,7 +13,7 @@ from skeleton.utils import get_loggger, insert_into_file
 from skeleton.examples.licenses import LicenseChoice
 
 
-_LOG = get_loggger(__name__)
+logger = get_loggger(__name__)
 
 NS_HEADER = """
 __import__('pkg_resources').declare_namespace(__name__)
@@ -104,7 +104,7 @@ class BasicPackage(Skeleton):
         """
         package_part = package.split('.')
         path = os.path.join(dst_dir, *package_part)
-        _LOG.info("Creating package %s" % package)
+        logger.info("Creating package %s" % package)
         if self.run_dry:
             return
         os.mkdir(path)

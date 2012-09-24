@@ -291,7 +291,7 @@ class TestSkeleton(TestCase):
                 skel.write(tmp_dir.path)
                 self.fail("An exception should be raised")
             except (FileNameKeyError,), exc:
-                self.assertTrue(exc.file_path.endswith('bar/{baz}.txt'))
+                self.assertTrue(exc.file_path.endswith('{baz}.txt'))
                 self.assertEqual(exc.variable_name, 'baz')
 
     def test_run_with_var(self):
